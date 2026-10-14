@@ -1,0 +1,144 @@
+{
+  "_comment": "A collected snapshot, exactly what --dump-input writes. Replay it offline with: aws-s3-lifecycle-audit --input examples/snapshot.json",
+  "buckets": [
+    {
+      "name": "build-artifacts",
+      "region": "eu-central-1",
+      "lifecycle_present": false,
+      "lifecycle": [],
+      "versioning": "Disabled",
+      "metrics": {
+        "bytes_standard": 3298534883328,
+        "bytes_standard_known": true,
+        "bytes_noncurrent": null,
+        "objects": 1840221
+      },
+      "multipart": {
+        "upload_count": 4,
+        "part_bytes": 11811160064,
+        "part_bytes_known": true,
+        "oldest_initiated": "2025-11-20T03:14:00+00:00"
+      }
+    },
+    {
+      "name": "config-store",
+      "region": "us-east-1",
+      "lifecycle_present": true,
+      "lifecycle": [
+        {
+          "ID": "abort-incomplete-multipart-upload",
+          "Status": "Enabled",
+          "Filter": { "Prefix": "" },
+          "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+        },
+        {
+          "ID": "transition-to-standard-ia",
+          "Status": "Enabled",
+          "Filter": { "Prefix": "" },
+          "Transitions": [{ "Days": 30, "StorageClass": "STANDARD_IA" }]
+        }
+      ],
+      "versioning": "Enabled",
+      "metrics": {
+        "bytes_standard": 12884901888,
+        "bytes_standard_known": true,
+        "bytes_noncurrent": 450971566080,
+        "noncurrent_version_count": 712043,
+        "objects": 9124
+      },
+      "multipart": {
+        "upload_count": 0,
+        "part_bytes": 0,
+        "part_bytes_known": true,
+        "oldest_initiated": null
+      }
+    },
+    {
+      "name": "access-logs",
+      "region": "us-east-1",
+      "lifecycle_present": true,
+      "lifecycle": [
+        {
+          "ID": "archive-old-logs",
+          "Status": "Disabled",
+          "Filter": { "Prefix": "alb/" },
+          "Transitions": [{ "Days": 30, "StorageClass": "GLACIER" }]
+        },
+        {
+          "ID": "expire-old-versions",
+          "Status": "Disabled",
+          "Filter": { "Prefix": "" },
+          "NoncurrentVersionExpiration": { "NoncurrentDays": 90 }
+        }
+      ],
+      "versioning": "Enabled",
+      "metrics": {
+        "bytes_standard": 858993459200,
+        "bytes_standard_known": true,
+        "bytes_noncurrent": 161061273600,
+        "noncurrent_version_count": 48201,
+        "objects": 20418773
+      },
+      "multipart": {
+        "upload_count": 1,
+        "part_bytes": 2147483648,
+        "part_bytes_known": true,
+        "oldest_initiated": "2026-09-30T22:05:00+00:00"
+      }
+    },
+    {
+      "name": "tf-state-prod",
+      "region": "eu-central-1",
+      "lifecycle_present": true,
+      "lifecycle": [
+        {
+          "ID": "hygiene",
+          "Status": "Enabled",
+          "Filter": { "Prefix": "" },
+          "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 },
+          "NoncurrentVersionExpiration": { "NoncurrentDays": 30 },
+          "Transitions": [{ "Days": 90, "StorageClass": "STANDARD_IA" }]
+        }
+      ],
+      "versioning": "Enabled",
+      "metrics": {
+        "bytes_standard": 48234496,
+        "bytes_standard_known": true,
+        "bytes_noncurrent": 912334848,
+        "objects": 311
+      },
+      "multipart": {
+        "upload_count": 0,
+        "part_bytes": 0,
+        "part_bytes_known": true,
+        "oldest_initiated": null
+      }
+    },
+    {
+      "name": "media-cold",
+      "region": "eu-west-1",
+      "lifecycle_present": true,
+      "lifecycle": [
+        {
+          "ID": "abort-incomplete-multipart-upload",
+          "Status": "Enabled",
+          "Filter": { "Prefix": "" },
+          "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 3 }
+        }
+      ],
+      "versioning": "Suspended",
+      "metrics": {
+        "bytes_standard": 1649267441664,
+        "bytes_standard_known": true,
+        "bytes_noncurrent": null,
+        "objects": 4412
+      },
+      "multipart": {
+        "upload_count": 0,
+        "part_bytes": 0,
+        "part_bytes_known": true,
+        "oldest_initiated": null
+      }
+    }
+  ]
+}

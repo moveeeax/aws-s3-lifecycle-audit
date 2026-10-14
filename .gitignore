@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# --emit-lifecycle output, when it lands in the repo root
+/fixes/
+
+# Collected account snapshots can name real buckets; the committed fixture is
+# examples/snapshot.json and is deliberately tracked.
+/*-account.json

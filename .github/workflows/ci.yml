@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: python -m pip install --upgrade pip && pip install -e '.[dev]'
+
+      - name: Test
+        run: pytest
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: python -m pip install --upgrade pip && pip install ruff
+
+      - name: Ruff
+        run: ruff check .
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: python -m pip install --upgrade pip && pip install -e .
+
+      - name: Report the bundled snapshot
+        run: aws-s3-lifecycle-audit --input examples/snapshot.json
+
+      - name: Exit 1 when a selected rule fires
+        run: |
+          set +e
+          aws-s3-lifecycle-audit --input examples/snapshot.json --fail-on no-abort-mpu
+          code=$?
+          set -e
+          test "$code" -eq 1 || { echo "expected exit 1, got $code"; exit 1; }
+
+      - name: Exit 0 when nothing selected fires
+        run: |
+          aws-s3-lifecycle-audit --input examples/snapshot.json \
+            --ignore-rule no-abort-mpu --fail-on no-abort-mpu
+
+      - name: Emit lifecycle fixes
+        run: |
+          aws-s3-lifecycle-audit --input examples/snapshot.json --emit-lifecycle ./fixes
+          test -f ./fixes/build-artifacts.json
+          cat ./fixes/build-artifacts.json
