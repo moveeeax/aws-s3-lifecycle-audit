@@ -1,7 +1,7 @@
 # aws-s3-lifecycle-audit
 
 [![CI](https://github.com/moveeeax/aws-s3-lifecycle-audit/actions/workflows/ci.yml/badge.svg)](https://github.com/moveeeax/aws-s3-lifecycle-audit/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Report the S3 lifecycle rules your buckets are **missing**, with the bytes and the
@@ -70,6 +70,7 @@ worst buckets:
 | flag | what it does |
 | --- | --- |
 | `--format text\|json` | table for humans, JSON for everything else |
+| `--profile NAME` | AWS profile to use instead of the default credential chain |
 | `--region REGION` | scope the scan; repeatable or comma-separated |
 | `--ignore-bucket NAME` | deliberately exempt bucket, skipped before evaluation |
 | `--ignore-rule RULE` | mute one rule everywhere |
@@ -81,6 +82,7 @@ worst buckets:
 | `--input FILE` | score a collected snapshot instead of calling AWS (`-` for stdin) |
 | `--dump-input FILE` | save the snapshot so a later run can be replayed offline |
 | `--emit-lifecycle DIR` | write `<bucket>.json` adding only the missing rules |
+| `--version` | print the version and exit |
 
 Exit codes: `0` clean (or findings without `--fail-on`), `1` a `--fail-on` rule fired,
 `2` bad usage, `3` an AWS or input error.
