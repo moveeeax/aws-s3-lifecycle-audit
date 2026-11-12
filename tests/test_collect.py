@@ -60,7 +60,10 @@ class FakeS3:
         value = self._bucket(Bucket).get("lifecycle")
         if isinstance(value, Exception):
             raise value
-        return {"Rules": value}
+        response = {"Rules": value}
+        if "min_size" in self._bucket(Bucket):
+            response["TransitionDefaultMinimumObjectSize"] = self._bucket(Bucket)["min_size"]
+        return response
 
     def get_bucket_versioning(self, Bucket):  # noqa: N803
         value = self._bucket(Bucket).get("versioning")
@@ -173,6 +176,15 @@ def test_missing_lifecycle_config_is_not_an_error():
     assert bucket["lifecycle_present"] is False
     assert bucket["lifecycle"] == []
     assert "lifecycle_unknown" not in bucket
+
+
+def test_transition_default_minimum_object_size_is_kept():
+    session = FakeSession(
+        buckets={"one": {"versioning": "Disabled", "lifecycle": [],
+                         "min_size": "varies_by_storage_class"}}
+    )
+    (bucket,) = collector.collect(session, now=NOW)
+    assert bucket["lifecycle_transition_min_size"] == "varies_by_storage_class"
 
 
 def test_denied_lifecycle_is_marked_unknown_not_absent():

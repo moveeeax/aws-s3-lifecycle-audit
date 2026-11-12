@@ -13,6 +13,7 @@ from aws_s3_lifecycle_audit.rules import (
     RULE_NO_TRANSITION,
     evaluate,
     evaluate_all,
+    merge_lifecycle,
     oldest_upload_age_days,
     parse_timestamp,
     severity_for,
@@ -359,12 +360,79 @@ def test_summary_rolls_up_waste_worst_bucket_first():
 def test_suggest_lifecycle_adds_only_missing_rules():
     found = evaluate(bucket(lifecycle=[NONCURRENT_RULE, TRANSITION_RULE]), now=NOW)
     config = suggest_lifecycle(found)
-    assert [r["ID"] for r in config["Rules"]] == ["abort-incomplete-multipart-upload"]
+    assert [r["ID"] for r in config["Rules"]] == ["lifecycle-audit-no-abort-mpu"]
     assert config["Rules"][0]["AbortIncompleteMultipartUpload"]["DaysAfterInitiation"] == 7
 
 
 def test_suggest_lifecycle_is_empty_for_a_clean_bucket():
     assert suggest_lifecycle(evaluate(bucket(), now=NOW)) == {"Rules": []}
+
+
+def test_suggested_ids_are_stable_per_rule():
+    found = evaluate(bucket(lifecycle=[], lifecycle_present=False), now=NOW)
+    ids = [r["ID"] for r in suggest_lifecycle(found)["Rules"]]
+    assert ids == [
+        "lifecycle-audit-no-abort-mpu",
+        "lifecycle-audit-no-noncurrent-expiry",
+        "lifecycle-audit-no-transition",
+    ]
+
+
+DISABLED_RULE = dict(TRANSITION_RULE, ID="old-archive", Status="Disabled")
+
+
+def test_merge_keeps_every_existing_rule_disabled_ones_too():
+    existing = [NONCURRENT_RULE, DISABLED_RULE]
+    found = evaluate(bucket(lifecycle=existing), now=NOW)
+    merged = merge_lifecycle(existing, suggest_lifecycle(found))
+    assert [r["ID"] for r in merged["Rules"]] == [
+        "expire-old",
+        "old-archive",
+        "lifecycle-audit-no-abort-mpu",
+        "lifecycle-audit-no-transition",
+    ]
+    assert merged["Rules"][0] == NONCURRENT_RULE
+
+
+def test_merge_replaces_an_earlier_run_rule_with_the_same_id():
+    stale = {
+        "ID": "lifecycle-audit-no-abort-mpu",
+        "Status": "Disabled",
+        "Filter": {"Prefix": ""},
+        "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7},
+    }
+    existing = [stale, NONCURRENT_RULE, TRANSITION_RULE]
+    found = evaluate(bucket(lifecycle=existing), now=NOW)
+    merged = merge_lifecycle(existing, suggest_lifecycle(found))
+    ids = [r["ID"] for r in merged["Rules"]]
+    assert ids.count("lifecycle-audit-no-abort-mpu") == 1
+    assert merged["Rules"][-1]["Status"] == "Enabled"
+
+
+def test_merge_into_a_legacy_prefix_config_uses_prefix_not_filter():
+    legacy = {"ID": "old", "Status": "Enabled", "Prefix": "logs/",
+              "Expiration": {"Days": 90}}
+    found = evaluate(bucket(lifecycle=[legacy]), now=NOW)
+    merged = merge_lifecycle([legacy], suggest_lifecycle(found))
+    for rule in merged["Rules"]:
+        assert "Filter" not in rule
+        assert "Prefix" in rule
+    assert merged["Rules"][1]["Prefix"] == ""
+
+
+def test_merge_does_not_mutate_its_inputs():
+    existing = [dict(NONCURRENT_RULE)]
+    suggested = suggest_lifecycle(evaluate(bucket(lifecycle=existing), now=NOW))
+    before = [dict(r) for r in suggested["Rules"]]
+    merge_lifecycle([{"ID": "x", "Status": "Enabled", "Prefix": ""}], suggested)
+    assert suggested["Rules"] == before
+
+
+def test_merge_refuses_to_exceed_the_s3_rule_limit():
+    existing = [dict(DISABLED_RULE, ID="r%d" % i) for i in range(1000)]
+    found = evaluate(bucket(lifecycle=existing), now=NOW)
+    with pytest.raises(ValueError, match="1000"):
+        merge_lifecycle(existing, suggest_lifecycle(found))
 
 
 def test_finding_as_dict_is_json_shaped():

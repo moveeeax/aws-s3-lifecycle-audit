@@ -85,7 +85,11 @@ def lifecycle(session, name: str, region: Optional[str]) -> Dict[str, Any]:
         if code == "AccessDenied":
             return {"lifecycle_present": False, "lifecycle": [], "lifecycle_unknown": True}
         raise
-    return {"lifecycle_present": True, "lifecycle": list(response.get("Rules") or [])}
+    out: Dict[str, Any] = {"lifecycle_present": True, "lifecycle": list(response.get("Rules") or [])}
+    # A separate parameter of the put call, not part of the rules; --merge carries it.
+    if response.get("TransitionDefaultMinimumObjectSize"):
+        out["lifecycle_transition_min_size"] = str(response["TransitionDefaultMinimumObjectSize"])
+    return out
 
 
 def versioning(session, name: str, region: Optional[str]) -> str:

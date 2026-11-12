@@ -78,3 +78,12 @@ jobs:
           aws-s3-lifecycle-audit --input examples/snapshot.json --emit-lifecycle ./fixes
           test -f ./fixes/build-artifacts.json
           cat ./fixes/build-artifacts.json
+
+      - name: Emit merged lifecycle fixes, JSON and Terraform
+        run: |
+          aws-s3-lifecycle-audit --input examples/snapshot.json --emit-lifecycle ./merged --merge
+          python -c "import json; ids=[r['ID'] for r in json.load(open('merged/access-logs.json'))['Rules']]; assert ids[:2]==['archive-old-logs','expire-old-versions'], ids"
+          aws-s3-lifecycle-audit --input examples/snapshot.json --emit-lifecycle ./merged-tf \
+            --merge --emit-format terraform
+          test -f ./merged-tf/access-logs.tf
+          cat ./merged-tf/access-logs.tf

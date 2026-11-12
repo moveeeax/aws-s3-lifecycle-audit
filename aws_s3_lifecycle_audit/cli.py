@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from typing import Any, Dict, List, Optional, Sequence
 
 from . import __version__
+from .emit import EMIT_FORMATS, write_emitted
 from .pricing import (
     DEFAULT_STANDARD_IA_USD_PER_GB_MONTH,
     DEFAULT_STANDARD_USD_PER_GB_MONTH,
@@ -19,7 +19,6 @@ from .rules import (
     SEVERITIES,
     evaluate_all,
     should_fail,
-    suggest_lifecycle,
     unknown_rules,
 )
 
@@ -105,8 +104,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--emit-lifecycle",
         metavar="DIR",
-        help="write <bucket>.json per flagged bucket: a lifecycle config adding only "
-        "the missing rules",
+        help="write one lifecycle config per flagged bucket adding the missing rules; "
+        "applying one replaces the bucket's whole config, see --merge",
+    )
+    parser.add_argument(
+        "--merge",
+        action="store_true",
+        help="with --emit-lifecycle: keep the bucket's existing rules in the emitted config",
+    )
+    parser.add_argument(
+        "--emit-format",
+        choices=EMIT_FORMATS,
+        default=None,
+        help="with --emit-lifecycle: json for put-bucket-lifecycle-configuration (default), "
+        "terraform for an aws_s3_bucket_lifecycle_configuration resource",
     )
     return parser
 
@@ -127,24 +138,6 @@ def _load_snapshot(path: str) -> List[Dict[str, Any]]:
     return data
 
 
-def _write_emitted(directory: str, findings) -> int:
-    os.makedirs(directory, exist_ok=True)
-    by_bucket: Dict[str, List[Any]] = {}
-    for finding in findings:
-        by_bucket.setdefault(finding.bucket, []).append(finding)
-    written = 0
-    for bucket, items in sorted(by_bucket.items()):
-        config = suggest_lifecycle(items)
-        if not config["Rules"]:
-            continue
-        path = os.path.join(directory, "%s.json" % bucket)
-        with open(path, "w", encoding="utf-8") as handle:
-            json.dump(config, handle, indent=2)
-            handle.write("\n")
-        written += 1
-    return written
-
-
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -154,6 +147,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     bad = unknown_rules(fail_on + ignore_rules)
     if bad:
         parser.error("unknown rule(s): %s" % ", ".join(sorted(set(bad))))
+    if (args.merge or args.emit_format) and not args.emit_lifecycle:
+        parser.error("--merge and --emit-format need --emit-lifecycle DIR")
 
     regions = _csv(args.region)
     ignore_buckets = _csv(args.ignore_bucket)
@@ -194,8 +189,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     extra = None
     if args.emit_lifecycle:
-        written = _write_emitted(args.emit_lifecycle, findings)
-        extra = {"emitted_lifecycle_files": written, "emitted_lifecycle_dir": args.emit_lifecycle}
+        fmt = args.emit_format or "json"
+        result = write_emitted(
+            args.emit_lifecycle,
+            findings,
+            buckets,
+            fmt=fmt,
+            merge=args.merge,
+            warn=lambda message: sys.stderr.write("warning: %s\n" % message),
+        )
+        extra = {
+            "emitted_lifecycle_files": result["written"],
+            "emitted_lifecycle_dir": args.emit_lifecycle,
+            "emitted_lifecycle_format": fmt,
+            "emitted_lifecycle_merged": bool(args.merge),
+            "emitted_lifecycle_skipped": result["skipped"],
+        }
 
     sys.stdout.write(render(findings, args.format, len(buckets), extra))
 

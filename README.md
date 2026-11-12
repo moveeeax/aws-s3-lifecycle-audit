@@ -81,7 +81,9 @@ worst buckets:
 | `--standard-rate` / `--ia-rate` | override the $/GB-month assumptions |
 | `--input FILE` | score a collected snapshot instead of calling AWS (`-` for stdin) |
 | `--dump-input FILE` | save the snapshot so a later run can be replayed offline |
-| `--emit-lifecycle DIR` | write `<bucket>.json` adding only the missing rules |
+| `--emit-lifecycle DIR` | write one lifecycle config per flagged bucket with the missing rules |
+| `--merge` | with `--emit-lifecycle`: keep the bucket's existing rules in that config |
+| `--emit-format json\|terraform` | `<bucket>.json` for `put-bucket-lifecycle-configuration` (default) or `<bucket>.tf` with an `aws_s3_bucket_lifecycle_configuration` resource |
 | `--version` | print the version and exit |
 
 Exit codes: `0` clean (or findings without `--fail-on`), `1` a `--fail-on` rule fired,
@@ -112,16 +114,51 @@ negotiated contract will differ — pass `--standard-rate` and `--ia-rate`.
 
 ## Fixing what it finds
 
+`put-bucket-lifecycle-configuration` replaces the bucket's whole lifecycle config, and so
+does Terraform's `aws_s3_bucket_lifecycle_configuration`. Emit with `--merge` so the
+rules already on the bucket go back in alongside the new ones:
+
 ```shell
-aws-s3-lifecycle-audit --emit-lifecycle ./fixes
+aws-s3-lifecycle-audit --emit-lifecycle ./fixes --merge
 aws s3api put-bucket-lifecycle-configuration \
   --bucket build-artifacts \
   --lifecycle-configuration file://fixes/build-artifacts.json
 ```
 
-The emitted config contains only the rules that were missing — 7 days for abandoned
-parts, 30 days for noncurrent versions, a 30-day `STANDARD_IA` transition. Read it before
-you apply it; a transition is a billing decision, not a lint fix.
+The added rules are 7 days for abandoned parts, 30 days for noncurrent versions and a
+30-day `STANDARD_IA` transition, with stable IDs `lifecycle-audit-<rule>`
+(`lifecycle-audit-no-abort-mpu` and so on). Read the file before you apply it; a
+transition is a billing decision, not a lint fix.
+
+What `--merge` does with the existing config:
+
+- every existing rule is written back unchanged, `Status=Disabled` ones included;
+- an existing rule with a `lifecycle-audit-<rule>` ID from an earlier run is replaced
+  by the new one, because S3 rejects duplicate IDs;
+- if the existing rules use only the deprecated top-level `Prefix`, the new rules use
+  `"Prefix": ""` too instead of `Filter`;
+- a bucket whose lifecycle config was `AccessDenied` is skipped with a warning, since
+  there is nothing safe to merge into, and so is one that would pass S3's 1,000-rule
+  limit;
+- `TransitionDefaultMinimumObjectSize` is not part of the JSON config. When the bucket
+  has `varies_by_storage_class`, a warning tells you to pass
+  `--transition-default-minimum-object-size` to the put call. The Terraform output
+  sets `transition_default_minimum_object_size` itself.
+
+Without `--merge` the file holds only the new rules, and the tool warns on stderr for
+every bucket that already has rules, because applying that file would delete them.
+
+For Terraform, `--emit-format terraform` writes `<bucket>.tf` with one resource per
+bucket, checked against `terraform validate` and `terraform fmt` with
+`hashicorp/aws` 6.x:
+
+```shell
+aws-s3-lifecycle-audit --emit-lifecycle ./fixes --merge --emit-format terraform
+```
+
+If the bucket's config is already managed by Terraform, copy the new `rule` blocks into
+that resource instead of adding a second one. A rule field the renderer does not know
+skips the bucket with a warning rather than being dropped from the output.
 
 ## In CI
 
