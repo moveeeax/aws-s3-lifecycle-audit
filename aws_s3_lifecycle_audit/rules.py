@@ -388,15 +388,31 @@ SUGGEST_ABORT_DAYS = 7
 SUGGEST_NONCURRENT_DAYS = 30
 SUGGEST_TRANSITION_DAYS = 30
 
+#: Generated rule IDs are ``lifecycle-audit-<rule>``. Stable, so a second run over a
+#: bucket that already carries one replaces it instead of adding a duplicate ID.
+SUGGEST_ID_PREFIX = "lifecycle-audit-"
+
+#: PutBucketLifecycleConfiguration rejects more rules than this; not adjustable.
+MAX_LIFECYCLE_RULES = 1000
+
+
+def suggested_rule_id(rule: str) -> str:
+    return SUGGEST_ID_PREFIX + rule
+
 
 def suggest_lifecycle(findings: Sequence[Finding]) -> Dict[str, Any]:
-    """A ready-to-apply ``LifecycleConfiguration`` adding only the missing rules."""
+    """A ``LifecycleConfiguration`` holding only the missing rules.
+
+    PutBucketLifecycleConfiguration replaces the whole config, so this alone is safe to
+    apply only to a bucket with no lifecycle rules. ``merge_lifecycle`` is the version
+    that keeps what is already there.
+    """
     rules: List[Dict[str, Any]] = []
     fired = {f.rule for f in findings}
     if RULE_NO_ABORT_MPU in fired:
         rules.append(
             {
-                "ID": "abort-incomplete-multipart-upload",
+                "ID": suggested_rule_id(RULE_NO_ABORT_MPU),
                 "Status": "Enabled",
                 "Filter": {"Prefix": ""},
                 "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": SUGGEST_ABORT_DAYS},
@@ -405,7 +421,7 @@ def suggest_lifecycle(findings: Sequence[Finding]) -> Dict[str, Any]:
     if RULE_NO_NONCURRENT_EXPIRY in fired:
         rules.append(
             {
-                "ID": "expire-noncurrent-versions",
+                "ID": suggested_rule_id(RULE_NO_NONCURRENT_EXPIRY),
                 "Status": "Enabled",
                 "Filter": {"Prefix": ""},
                 "NoncurrentVersionExpiration": {"NoncurrentDays": SUGGEST_NONCURRENT_DAYS},
@@ -414,12 +430,43 @@ def suggest_lifecycle(findings: Sequence[Finding]) -> Dict[str, Any]:
     if RULE_NO_TRANSITION in fired:
         rules.append(
             {
-                "ID": "transition-to-standard-ia",
+                "ID": suggested_rule_id(RULE_NO_TRANSITION),
                 "Status": "Enabled",
                 "Filter": {"Prefix": ""},
                 "Transitions": [
                     {"Days": SUGGEST_TRANSITION_DAYS, "StorageClass": "STANDARD_IA"}
                 ],
             }
+        )
+    return {"Rules": rules}
+
+
+def _uses_legacy_prefix(rules: Sequence[Dict[str, Any]]) -> bool:
+    """True when the config is written in the old top-level ``Prefix`` style only."""
+    return bool(rules) and all("Prefix" in r and "Filter" not in r for r in rules)
+
+
+def merge_lifecycle(
+    existing: Sequence[Dict[str, Any]], suggested: Dict[str, Any]
+) -> Dict[str, Any]:
+    """The existing rules plus the suggested ones, as one config to put back.
+
+    Every existing rule is kept as it is, disabled ones too: a disabled rule is still
+    something the owner wrote, and dropping it from a replace-the-whole-config call
+    deletes it. An existing rule whose ID equals a suggested ID (a ``lifecycle-audit-``
+    rule from an earlier run that is now disabled or edited) is replaced, because S3
+    rejects duplicate IDs. If the existing rules use only the deprecated top-level
+    ``Prefix``, the new rules use it too rather than mixing the two styles.
+    """
+    new_rules = [dict(r) for r in suggested.get("Rules") or []]
+    if _uses_legacy_prefix(existing):
+        for rule in new_rules:
+            rule["Prefix"] = (rule.pop("Filter", None) or {}).get("Prefix", "")
+    taken = {r["ID"] for r in new_rules}
+    kept = [dict(r) for r in existing if r.get("ID") not in taken]
+    rules = kept + new_rules
+    if len(rules) > MAX_LIFECYCLE_RULES:
+        raise ValueError(
+            "merged config would have %d rules; S3 allows %d" % (len(rules), MAX_LIFECYCLE_RULES)
         )
     return {"Rules": rules}

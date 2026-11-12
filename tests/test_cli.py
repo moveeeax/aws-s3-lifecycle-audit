@@ -148,9 +148,56 @@ def test_emit_lifecycle_writes_only_the_missing_rules(capsys, tmp_path):
     assert "tf-state-prod.json" not in written
     config = json.loads((outdir / "config-store.json").read_text(encoding="utf-8"))
     ids = [r["ID"] for r in config["Rules"]]
-    assert "expire-noncurrent-versions" in ids
+    assert "lifecycle-audit-no-noncurrent-expiry" in ids
     for rule in config["Rules"]:
         assert rule["Status"] == "Enabled"
+
+
+def test_emit_lifecycle_merge_keeps_existing_rules(capsys, tmp_path):
+    outdir = tmp_path / "fixes"
+    code, out, err = run(
+        capsys, "--input", FIXTURE, "--emit-lifecycle", str(outdir), "--merge", "--format", "json"
+    )
+    assert code == EXIT_OK
+    assert err == ""
+    data = json.loads(out)
+    assert data["emitted_lifecycle_merged"] is True
+    assert data["emitted_lifecycle_format"] == "json"
+    assert data["emitted_lifecycle_skipped"] == []
+    config = json.loads((outdir / "access-logs.json").read_text(encoding="utf-8"))
+    ids = [r["ID"] for r in config["Rules"]]
+    # The two disabled rules the owner wrote stay; the missing ones are added after them.
+    assert ids[:2] == ["archive-old-logs", "expire-old-versions"]
+    assert "lifecycle-audit-no-abort-mpu" in ids
+
+
+def test_emit_lifecycle_without_merge_warns_on_buckets_with_rules(capsys, tmp_path):
+    code, _, err = run(capsys, "--input", FIXTURE, "--emit-lifecycle", str(tmp_path / "fixes"))
+    assert code == EXIT_OK
+    assert "warning: config-store: has 2 existing rule(s)" in err
+    assert "build-artifacts" not in err
+
+
+def test_emit_format_terraform_writes_tf_files(capsys, tmp_path):
+    outdir = tmp_path / "fixes"
+    code, _, _ = run(
+        capsys, "--input", FIXTURE, "--emit-lifecycle", str(outdir), "--merge",
+        "--emit-format", "terraform",
+    )
+    assert code == EXIT_OK
+    assert sorted(p.suffix for p in outdir.iterdir()) == [".tf"] * 4
+    text = (outdir / "media-cold.tf").read_text(encoding="utf-8")
+    assert 'resource "aws_s3_bucket_lifecycle_configuration" "media-cold"' in text
+    assert 'id     = "abort-incomplete-multipart-upload"' in text
+    assert 'id     = "lifecycle-audit-no-transition"' in text
+
+
+@pytest.mark.parametrize("flags", [["--merge"], ["--emit-format", "terraform"]])
+def test_emit_options_need_emit_lifecycle(capsys, flags):
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--input", FIXTURE] + flags)
+    assert excinfo.value.code == EXIT_USAGE
+    assert "--emit-lifecycle" in capsys.readouterr().err
 
 
 def test_dump_input_round_trips(capsys, tmp_path):
